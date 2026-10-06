@@ -28,13 +28,35 @@ function formatBytes($bytes, $precision = 1) {
 }
 
 
-$ruri = $_SERVER['REQUEST_URI'];
+// Nur den Pfad nehmen, ohne Query-String: "/?foo=bar" ist kein Verzeichnis.
+$ruri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if (!is_string($ruri) || $ruri === '') {
+    $ruri = '/';
+}
 
-// echo $ruri . '<br><br>';
-//
-// echo __DIR__ . '<br><br>';
+// Der angefragte Pfad ging frueher ungeprueft an scandir(). Dass sich daraus
+// nichts ausbrechen liess, lag allein am Webserver: nginx weist "/../" mit
+// 400 ab, bevor PHP ueberhaupt gefragt wird. Dieses Skript laeuft aber auf
+// mehreren Installationen und laut dem Kopf oben auch unter PHPs eingebautem
+// Server, wo es diesen Schutz nicht gibt. Also pruefen wir hier selbst.
+$wurzel = realpath(__DIR__);
+$ziel   = realpath($wurzel . '/' . rawurldecode($ruri));
 
-$itemliste = scandir(__DIR__ . $ruri);
+$vorhanden = $ziel !== false
+    && ($ziel === $wurzel
+        || strncmp($ziel, $wurzel . DIRECTORY_SEPARATOR, strlen($wurzel) + 1) === 0)
+    && is_dir($ziel);
+
+if ($vorhanden) {
+    $itemliste = scandir($ziel);
+} else {
+    // Hier kam frueher eine leere Liste mit HTTP 200 heraus. Wer die
+    // Vollstaendigkeit eines Verzeichnisses ueber Statuscodes prueft, bekam
+    // damit "liegt alles da" fuer etwas, das es gar nicht gibt. Die Seite
+    // wird trotzdem gezeigt, nur eben mit dem richtigen Status.
+    http_response_code(404);
+    $itemliste = [];
+}
 
 $pfadteile = explode('/', $ruri);
 
@@ -76,12 +98,13 @@ if(1 !== preg_match('/[a-zA-Z0-9]*\/$/', $ruri)) {
       $activ = '';
       $ariacurrent = '';
       $url = dirname($ruri, (($anzahl >= 1) ? $anzahl : 1));
-      $link = '<a href="' . $url . '">' . $pfad . '</a>';
+      $link = '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars(rawurldecode($pfad), ENT_QUOTES, 'UTF-8') . '</a>';
       $anzahl--;
       if($key === array_key_last($pfadteile)) {
         $activ = ' active';
         $ariacurrent = ' aria-current="page"';
-        $link = $pfad;
+        $link = htmlspecialchars(rawurldecode($pfad), ENT_QUOTES, 'UTF-8');
       }
     ?>
     <li class="breadcrumb-item<?= $activ ?>"<?= $ariacurrent ?>><?= $link ?></li>
@@ -94,6 +117,12 @@ if(1 !== preg_match('/[a-zA-Z0-9]*\/$/', $ruri)) {
 <!-- <div class="row">
 
 <div class="col"> -->
+
+<?php if(!$vorhanden): ?>
+<div class="alert alert-warning" role="alert">
+  Diesen Pfad gibt es hier nicht.
+</div>
+<?php endif; ?>
 
 <table id="filelist" class="display table table-striped table-hover table-sm" style="width: 100%;">
     <thead>
@@ -126,7 +155,7 @@ if(in_array($item, $blacklist)) continue;
 
 if($item == '.' || $item == '..' || 1 == preg_match('/^\.[a-z]+/', $item)) continue;
 
-$stats = stat(__DIR__ . $ruri . $item);
+$stats = stat($ziel . '/' . $item);
 
 $size = $stats['size'];
 $mtime = $stats['mtime'];
@@ -137,13 +166,13 @@ $mtime = $stats['mtime'];
 <tr>
     <td class="d-none"></td>
     <td>
-      <?php if(is_file(__DIR__ . $ruri . $item)): ?>
+      <?php if(is_file($ziel . '/' . $item)): ?>
         <img src="/img/file-earmark-binary.svg" alt="Datei" width="16" height="16" title="Datei">
       <?php else: ?>
         <img src="/img/folder.svg" alt="Ordner" width="16" height="16" title="Ordner">
       <?php $size = '-'; ?>
       <?php endif; ?>
-      <a href="<?= $ruri . $item ?>"><?= $item ?></a>
+      <a href="<?= htmlspecialchars($ruri . rawurlencode($item), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($item, ENT_QUOTES, 'UTF-8') ?></a>
     </td>
     <td data-sort="<?= $mtime ?>"><?= date('d.m.Y H:i:s', $mtime) ?></td>
     <td data-sort="<?= $size ?>"><?= formatBytes($size) ?></td>
