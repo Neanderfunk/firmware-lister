@@ -39,13 +39,29 @@ if (!is_string($ruri) || $ruri === '') {
 // 400 ab, bevor PHP ueberhaupt gefragt wird. Dieses Skript laeuft aber auf
 // mehreren Installationen und laut dem Kopf oben auch unter PHPs eingebautem
 // Server, wo es diesen Schutz nicht gibt. Also pruefen wir hier selbst.
-$wurzel = realpath(__DIR__);
-$ziel   = realpath($wurzel . '/' . rawurldecode($ruri));
+//
+// Wichtig: rein rechnerisch normalisieren, NICHT ueber realpath(). Der
+// Webroot enthaelt absichtlich Symlinks, die nach aussen zeigen - die
+// images*-Verweise auf /home/build sind der ganze Zweck dieser Server.
+// realpath() loest sie auf, und eine Eindaemmung auf den Webroot wuerde
+// sie damit alle zu 404 machen. Gefaehrlich ist nicht ein Symlink, den der
+// Betreiber gelegt hat, sondern ein ".." aus der Anfrage.
+$wurzel = __DIR__;
 
-$vorhanden = $ziel !== false
-    && ($ziel === $wurzel
-        || strncmp($ziel, $wurzel . DIRECTORY_SEPARATOR, strlen($wurzel) + 1) === 0)
-    && is_dir($ziel);
+$teile = [];
+foreach (explode('/', rawurldecode($ruri)) as $stueck) {
+    if ($stueck === '' || $stueck === '.') {
+        continue;
+    }
+    if ($stueck === '..') {
+        array_pop($teile);   // auf der Wurzel laeuft das ins Leere, nicht darueber hinaus
+        continue;
+    }
+    $teile[] = $stueck;
+}
+$ziel = $wurzel . ($teile ? '/' . implode('/', $teile) : '');
+
+$vorhanden = is_dir($ziel);
 
 if ($vorhanden) {
     $itemliste = scandir($ziel);
